@@ -1,0 +1,24 @@
+name: JBlockEvent
+version: '${project.version}'
+main: jfbdev.jblockevent.JBlockEvent
+api-version: '1.16'
+authors: [ jFrostyBoy ]
+description: Кастомные ивенты с сокровищами, голограммами и таймерами
+softdepend: [DecentHolograms]
+
+commands:
+  jbe:
+    description: Основная команда плагина
+    usage: /jbe <reload|start|stop|eventsdelay>
+  eventsdelay:
+    description: Показать статус всех ивентов
+    usage: /eventsdelay
+    aliases: [ed]
+
+permissions:
+  jblockevent.admin:
+    description: Полный доступ к админ-командам
+    default: op
+  jblockevent.player:
+    description: Просмотр статуса ивентов (/eventsdelay)
+    default: true
