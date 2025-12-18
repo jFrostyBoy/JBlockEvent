@@ -163,3 +163,12 @@ messages:
 - `/jbe start <номер>` — принудительно спавнит ивент по номеру из конфига (таб-комплит).
 
 - `/jbe stop <номер>` — принудительно останавливает активный ивент
+
+  
+<img width="545" height="137" alt="Screenshot_5" src="https://github.com/user-attachments/assets/58d3f6dc-ae79-4bc2-be52-e4831797afa5" />
+<img width="713" height="90" alt="Screenshot_4" src="https://github.com/user-attachments/assets/6ebcb71a-0b03-476f-867d-91648e2754ff" />
+<img width="1020" height="171" alt="Screenshot_3" src="https://github.com/user-attachments/assets/78304c15-31b4-4947-96cd-5e9aca0ad1ec" />
+<img width="560" height="593" alt="Screenshot_2" src="https://github.com/user-attachments/assets/4694993b-0aa0-4179-a765-b588a933d618" />
+<img width="1919" height="908" alt="Screenshot_1" src="https://github.com/user-attachments/assets/8a65975c-abd0-4303-8bd2-d2cb1d361550" />
+<img width="841" height="224" alt="Screenshot_6" src="https://github.com/user-attachments/assets/095864d1-12ce-4584-8f82-e806deb33362" />
+
