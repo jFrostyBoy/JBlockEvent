@@ -1,111 +1,145 @@
-# Ивенты (номер — ключ)
-events:
-  1:
-    location: "world:100:64:200"
-    block-material: BEACON
-    spawn-interval-minutes: 10
-    breakable-delay-seconds: 300
-    disappear-seconds: 600
+# ========================================================================
+#           JBlockEvent — Конфигурационный файл (config.yml)
+# ========================================================================
+# Этот файл содержит все настройки плагина.
+# После изменений сохраните файл и выполните команду /jbe reload.
+# ========================================================================
 
-  2:
-    location: "world:-50:70:300"
-    block-material: EMERALD_BLOCK
-    spawn-interval-minutes: 20
-    breakable-delay-seconds: 180
-    disappear-seconds: 360
-
-# Голограммы
-hologram-before:
-  - "&6&lСОКРОВИЩЕ!"
-  - "&eПодождите появления..."
-  - ""
-  - "&fДо ломания: &c%timer_delay%"
-
-hologram-after:
-  - "&c&lЛОМАЙ СЕЙЧАС!"
-  - "&a&lБлок доступен!"
-
-# Смещение голограммы относительно центра блока
+# Смещение голограммы относительно блока ивента
 hologram-offset:
-  height: 2.5    # Высота над блоком (от центра блока)
-  x: 0.5         # Смещение по X (0.5 — центр)
-  z: 0.5         # Смещение по Z (0.5 — центр)
+  height: 2.5  # Высота над блоком (рекомендуется 2.0 для видимости сверху)
+  x: 0.5       # Смещение по оси X (0.5 — центр блока)
+  z: 0.5       # Смещение по оси Z (0.5 — центр блока)
 
 # Формат таймера
 timer-format:
-  minutes-singular: "минута"
-  minutes-plural: "минуты"
-  minutes-many: "минут"
-  seconds-singular: "секунда"
-  seconds-plural: "секунды"
-  seconds-many: "секунд"
-  separator: " "
-  only-seconds: "сек."
+  minutes: "мин."  # Сокращение для минут (например, "мин." или "м.")
+  seconds: "сек."  # Сокращение для секунд (например, "сек." или "с.")
+  format: "%m %s"  # Формат вывода таймера (%m — минуты, %s — секунды; можно "%m, %s" или "%m%s")
 
-# Звуки
+# Звуковые эффекты для событий
 sounds:
-  spawn: "ENTITY_ENDER_DRAGON_AMBIENT"
-  breakable: "BLOCK_NOTE_BLOCK_BELL"
-  disappear: "ENTITY_GENERIC_EXPLODE"
-  volume: 1.0
-  pitch: 1.0
+  spawn: "ENTITY_ENDER_DRAGON_AMBIENT"  # Звук при появлении блока
+  breakable: "BLOCK_NOTE_BLOCK_BELL"    # Звук, когда блок становится доступным
+  unbrekable: "ENTITY_VILLAGER_NO"      # Звук при попытке сломать раньше времени
+  disappear: "ENTITY_GENERIC_EXPLODE"   # Звук при исчезновении блока
+  volume: 1.0                           # Громкость звука (от 0.0 до 2.0)
+  pitch: 1.0                            # Тон звука (от 0.5 до 2.0)
 
-# Многострочные сообщения
+# Текст голограммы до открытия
+hologram-before:
+  - "%display_name%"   # Названием ивента
+  - ""
+  - "&7До открытия:"
+  - "&c%timer_delay%"  # Таймер с обратным отсчётом
+
+# Текст голограммы после открытия
+hologram-after:
+  - "%display_name%"
+  - ""
+  - "&7Блок доступен для разрушения!"
+
+# Настройки боссбара (прогресс-бар вверху экрана)
+bossbar:
+  enabled: true                           # Включить боссбар? (true/false)
+  color: "PURPLE"                         # Цвет: RED, BLUE, GREEN, PINK, PURPLE, YELLOW, WHITE
+  style: "SEGMENTED_10"                   # Стиль: SOLID, SEGMENTED_6, SEGMENTED_10, SEGMENTED_12, SEGMENTED_20
+  protected:                              # Фаза защиты (до открытия)
+    text: "%display_name%  &7|  &fМир: %world%  &7|  &fДо открытия: &e%timer_delay%"
+    progress: true                        # Показывать прогресс? (true/false)
+  breakable:                              # Фаза разрушения (после открытия)
+    text: "%display_name%  &7|  &fМир: %world%  &7|  &fДо исчезновения: &e%timer_delay%"
+    progress: true                        # Показывать прогресс? (true/false)
+
+# Цвета названий миров
+world_colors:
+  world: "&a"           # Обычный мир — зелёный
+  world_nether: "&c"    # Nether — красный
+  world_the_end: "&5"   # End — фиолетовый
+  event_world: "&b"     # Евентный мир — голубой
+
+# Отображаемые названия миров
+world_names:
+  world: "Обычный"              # Отображаемое имя для мира 'world'
+  world_nether: "Незер"         # Отображаемое имя для 'world_nether'
+  world_the_end: "Энд"          # Отображаемое имя для 'world_the_end'
+  event_world: "Евентный мир"   # Отображаемое имя для 'event_world'
+
+# Все сообщения плагина
 messages:
   no-permission:
-    - "&cУ вас нет прав на эту команду!"
+    - "&fУ вас &cнет прав &fна использование этой команды!"
   reload-usage:
     - ""
-    - "&eИспользование команд:"
-    - " "
-    - "&a/jbe reload &7— перезагрузка плагина"
-    - "&a/jbe start <номер> &7— запустить ивент вручную"
-    - "&a/jbe stop <номер> &7— остановить ивент вручную"
-    - "&a/jbe eventsdelay &7— время до следующих ивентов"
-    - " "
+    - "  &6Помощь по командам:"
+    - ""
+    - "  &e/jbe reload &7— перезагрузить конфиг"
+    - "  &e/jbe start <id> &7— запустить ивент вручную"
+    - "  &e/jbe stop <id> &7— остановить ивент"
+    - "  &e/eventsdelay (/ed) &7— показать таймеры всех ивентов"
+    - ""
   reload-success:
-    - "&aJBlockEvent успешно перезагружен!"
-    - "&eАктивных ивентов в конфиге: &a%events%"
+    - "&fКонфигурация &aперезагружена! &fЗагружено ивентов: &a%events%"
   protected-break:
-    - "&cПодожди! Ещё нельзя ломать блок."
+    - ""
+    - "  &fЭтот блок ещё &cнельзя &fломать!"
+    - "  &fПодождите: &c%timer_delay%"
+    - ""
   break-success-broadcast:
     - ""
-    - "&a✦ &lИГРОК %player% СЛОМАЛ СОКРОВИЩЕ! &a✦"
-    - "&7Поздравляем с победой!"
+    - "  &fИвент %display_name% &fзавершён!"
+    - "  &fРазрушен игроком: &a%player%"
     - ""
   event-start-broadcast:
     - ""
-    - "&e⚡ &lНОВОЕ СОКРОВИЩЕ ПОЯВИЛОСЬ! ⚡"
-    - "&7Мир: &f%world%"
-    - "&7Координаты: &f%x% %y% %z%"
-    - "&7Успейте сломать первым!"
+    - "  &fИвент %display_name% &fзаспавнился"
+    - "  &fв мире: %world% &fна координатах: &a%x% %y% %z%"
     - ""
   event-end-broadcast:
     - ""
-    - "&c☠ &lСОКРОВИЩЕ ИСЧЕЗЛО ☠"
-    - "&7Никто не успел его сломать..."
-    - "&7Ждём следующий ивент!"
+    - "  &fИвент %display_name% &fзавершился!"
+    - "  &cНикто &fне сломал блок и он &cисчез!"
     - ""
   invalid-event-number:
-    - "&cИвент с номером &e%number% &cне найден в конфиге!"
+    - "&cНеверный &fномер ивента: &c%number%"
   event-already-active:
-    - "&cИвент №%number% уже активен!"
+    - "&fИвент #%number% &aуже активен!"
   event-started-manually:
-    - "&aИвент №%number% успешно запущен вручную!"
+    - "&fИвент #%number% &aзапущен &fвручную"
   event-stopped:
-    - "&cИвент №%id% был принудительно остановлен!"
+    - "&fИвент #%id% %display_name% &fбыл &cостановлен"
   eventsdelay-header:
     - ""
-    - "&e&l≫ СТАТУС СОКРОВИЩ ≪"
+    - "  &r&6&l&m                &r  &fТаймеры ивентов &7[ &e%total% &7]  &r&6&l&m                &r"
     - ""
   eventsdelay-inactive:
-    - "&7• Ивент &a#%id% &7(&f%material%&7): следующий спавн через &e%time%"
+    - "  &f#%id% %display_name% &8— &7спавн через: &f%time%"
   eventsdelay-active-protected:
-    - "&7• Ивент &a#%id% &7(&f%material%&7): можно ломать через &e%time%"
+    - "  &f#%id% %display_name% &8— &7можно сломать через: &c%time%"
   eventsdelay-active-breakable:
-    - "&7• Ивент &a#%id% &7(&f%material%&7): &a&lУЖЕ МОЖНО ЛОМАТЬ! &7(&f%x% %y% %z%&7)"
+    - "  &f#%id% %display_name% &8— &7доступен на координатах: &a%x% %y% %z% &7в мире: %world%"
   eventsdelay-footer:
     - ""
-    - "&eВсего ивентов: &a%total%"
+    - "  &r&6&l&m                                                          &r"
+    - ""
   eventsdelay-no-permission:
-    - "&cУ вас нет прав на эту команду!"
+    - "&fУ вас &cнет прав &fна просмотр таймеров!"
+
+# Список всех ивентов (добавьте столько, сколько нужно)
+# Каждый ивент имеет уникальный ID (ключ, например, 1, 2, 3...)
+events:
+  1:                                               # Ивент №1 (пример)
+    location: "world:100:64:200"                   # Формат: мир:x:y:z (координаты блока)
+    display_name: "&6✦ &e&lᴋᴘиᴄтᴀлл ᴄилы &6✦"     # Отображаемое имя (с цветами)
+    block-material: "BEACON"                       # Материал блока (из Minecraft)
+    spawn-interval-minutes: 30                     # Интервал появления в минутах (минимум 1)
+    breakable-delay-seconds: 300                   # Задержка защиты в секундах (минимум 0)
+    disappear-seconds: 600                         # Общее время жизни в секундах (минимум breakable-delay + 60)
+
+  2:                                               # Ивент №2 (пример)
+    location: "world_nether:-50:70:300"            # Координаты в Nether
+    display_name: "&4✦ &c&lᴀдᴄᴋий ᴏбᴇлиᴄᴋ &4✦"    # Имя с красным цветом
+    block-material: "NETHERITE_BLOCK"              # Материал
+    spawn-interval-minutes: 45                     # Интервал
+    breakable-delay-seconds: 420                   # Задержка защиты
+    disappear-seconds: 900                         # Время жизни
