@@ -9,6 +9,9 @@ import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
@@ -20,6 +23,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -38,20 +42,27 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
     private double holoX = 0.5;
     private double holoZ = 0.5;
 
-    private String minSingular = "минута";
-    private String minPlural = "минуты";
-    private String minMany = "минут";
-    private String secSingular = "секунда";
-    private String secPlural = "секунды";
-    private String secMany = "секунд";
-    private String separator = " ";
-    private String onlySecondsFormat = "сек.";
+    private String minutesAbbr = "мин.";
+    private String secondsAbbr = "сек.";
+    private String timerFormat = "%m %s";
 
     private Sound soundSpawn = Sound.ENTITY_ENDER_DRAGON_AMBIENT;
     private Sound soundBreakable = Sound.BLOCK_NOTE_BLOCK_BELL;
+    private Sound soundUnbreakable = Sound.ENTITY_VILLAGER_NO;
     private Sound soundDisappear = Sound.ENTITY_GENERIC_EXPLODE;
     private float soundVolume = 1.0f;
     private float soundPitch = 1.0f;
+
+    private boolean bossbarEnabled = true;
+    private String bossbarColorStr = "PURPLE";
+    private String bossbarStyleStr = "SEGMENTED_10";
+    private String bossbarProtectedText = "";
+    private boolean bossbarProtectedProgress = true;
+    private String bossbarBreakableText = "";
+    private boolean bossbarBreakableProgress = true;
+
+    private final Map<String, String> worldColors = new HashMap<>();
+    private final Map<String, String> worldNames = new HashMap<>();
 
     private List<String> msgNoPermission;
     private List<String> msgReloadUsage;
@@ -72,7 +83,7 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
     private List<String> msgEventStopped;
 
     private record EventLocation(int id, Location location, Material material, int spawnIntervalMinutes,
-                                 int breakableDelaySeconds, int disappearSeconds) {}
+                                 int breakableDelaySeconds, int disappearSeconds, String displayName) {}
 
     private final Map<Integer, EventLocation> eventById = new HashMap<>();
     private final List<EventLocation> eventLocations = new ArrayList<>();
@@ -80,10 +91,12 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
     private final Map<Location, String> activeHologramNames = new HashMap<>();
     private final Set<Location> protectedBlocks = new HashSet<>();
     private final Map<Location, BukkitTask> countdownTasks = new HashMap<>();
+    private final Map<Location, BukkitTask> breakableUpdateTasks = new HashMap<>();
     private final Map<Location, BukkitTask> spawnTasks = new HashMap<>();
     private final Map<Location, BukkitTask> disappearTasks = new HashMap<>();
     private final Map<Location, Integer> remainingSeconds = new HashMap<>();
     private final Map<Location, Long> spawnTimeMap = new HashMap<>();
+    private final Map<Location, BossBar> bossBars = new HashMap<>();
 
     @Override
     public void onEnable() {
@@ -116,6 +129,7 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         saveActiveEvents();
         cancelAllTasks();
         deleteAllHolograms();
+        removeAllBossBars();
         clearMaps();
         getLogger().info("JBlockEvent отключён.");
     }
@@ -142,14 +156,9 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
 
         ConfigurationSection timerSec = config.getConfigurationSection("timer-format");
         if (timerSec != null) {
-            minSingular = timerSec.getString("minutes-singular", "минута");
-            minPlural = timerSec.getString("minutes-plural", "минуты");
-            minMany = timerSec.getString("minutes-many", "минут");
-            secSingular = timerSec.getString("seconds-singular", "секунда");
-            secPlural = timerSec.getString("seconds-plural", "секунды");
-            secMany = timerSec.getString("seconds-many", "секунд");
-            separator = timerSec.getString("separator", " ");
-            onlySecondsFormat = timerSec.getString("only-seconds", "сек.");
+            minutesAbbr = timerSec.getString("minutes", "мин.");
+            secondsAbbr = timerSec.getString("seconds", "сек.");
+            timerFormat = timerSec.getString("format", "%m %s");
         }
 
         ConfigurationSection soundSec = config.getConfigurationSection("sounds");
@@ -157,12 +166,44 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             try {
                 soundSpawn = Sound.valueOf(soundSec.getString("spawn", "ENTITY_ENDER_DRAGON_AMBIENT").toUpperCase());
                 soundBreakable = Sound.valueOf(soundSec.getString("breakable", "BLOCK_NOTE_BLOCK_BELL").toUpperCase());
+                soundUnbreakable = Sound.valueOf(soundSec.getString("unbrekable", "ENTITY_VILLAGER_NO").toUpperCase());
                 soundDisappear = Sound.valueOf(soundSec.getString("disappear", "ENTITY_GENERIC_EXPLODE").toUpperCase());
             } catch (IllegalArgumentException e) {
                 getLogger().warning("Неверный звук в конфиге, используются дефолтные.");
             }
             soundVolume = (float) soundSec.getDouble("volume", 1.0);
             soundPitch = (float) soundSec.getDouble("pitch", 1.0);
+        }
+
+        ConfigurationSection bossbarSec = config.getConfigurationSection("bossbar");
+        if (bossbarSec != null) {
+            bossbarEnabled = bossbarSec.getBoolean("enabled", true);
+            bossbarColorStr = bossbarSec.getString("color", "PURPLE").toUpperCase();
+            bossbarStyleStr = bossbarSec.getString("style", "SEGMENTED_10").toUpperCase();
+            ConfigurationSection protectedSec = bossbarSec.getConfigurationSection("protected");
+            if (protectedSec != null) {
+                bossbarProtectedText = protectedSec.getString("text", "");
+                bossbarProtectedProgress = protectedSec.getBoolean("progress", true);
+            }
+            ConfigurationSection breakableSec = bossbarSec.getConfigurationSection("breakable");
+            if (breakableSec != null) {
+                bossbarBreakableText = breakableSec.getString("text", "");
+                bossbarBreakableProgress = breakableSec.getBoolean("progress", true);
+            }
+        }
+
+        ConfigurationSection worldColorsSec = config.getConfigurationSection("world_colors");
+        if (worldColorsSec != null) {
+            for (String key : worldColorsSec.getKeys(false)) {
+                worldColors.put(key, worldColorsSec.getString(key));
+            }
+        }
+
+        ConfigurationSection worldNamesSec = config.getConfigurationSection("world_names");
+        if (worldNamesSec != null) {
+            for (String key : worldNamesSec.getKeys(false)) {
+                worldNames.put(key, worldNamesSec.getString(key));
+            }
         }
 
         ConfigurationSection msgSec = config.getConfigurationSection("messages");
@@ -208,9 +249,9 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             if (world == null) continue;
 
             try {
-                double x = Double.parseDouble(parts[1]);
-                double y = Double.parseDouble(parts[2]);
-                double z = Double.parseDouble(parts[3]);
+                int x = Integer.parseInt(parts[1]);
+                int y = Integer.parseInt(parts[2]);
+                int z = Integer.parseInt(parts[3]);
                 Location loc = new Location(world, x, y, z);
 
                 String matStr = evSec.getString("block-material");
@@ -227,11 +268,13 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
                     mat = Material.BEACON;
                 }
 
+                String displayName = evSec.getString("display_name", "&eEvent #" + id);
+
                 int spawnMin = Math.max(1, evSec.getInt("spawn-interval-minutes", 10));
                 int delaySec = Math.max(0, evSec.getInt("breakable-delay-seconds", 300));
                 int disappearSec = Math.max(delaySec + 60, evSec.getInt("disappear-seconds", 600));
 
-                EventLocation ev = new EventLocation(id, loc, mat, spawnMin, delaySec, disappearSec);
+                EventLocation ev = new EventLocation(id, loc, mat, spawnMin, delaySec, disappearSec, displayName);
                 eventLocations.add(ev);
                 eventById.put(id, ev);
 
@@ -253,23 +296,61 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
                     msg = msg.replace(entry.getKey(), entry.getValue());
                 }
             }
-            Bukkit.getServer().broadcastMessage(msg);
+            Bukkit.getServer().broadcastMessage(ChatColor.translateAlternateColorCodes('&', msg));
         });
+    }
+
+    private void sendList(CommandSender sender, List<String> messages, Map<String, String> placeholders) {
+        messages.forEach(line -> {
+            String msg = line;
+            if (placeholders != null) {
+                for (Map.Entry<String, String> entry : placeholders.entrySet()) {
+                    msg = msg.replace(entry.getKey(), entry.getValue());
+                }
+            }
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
+        });
+    }
+
+    private String getColoredWorldName(World world) {
+        String name = world.getName();
+        String color = worldColors.getOrDefault(name, "&f");
+        String display = worldNames.getOrDefault(name, name);
+        return color + display;
     }
 
     private void startAllSpawnTasks() {
         spawnTasks.values().forEach(task -> Optional.ofNullable(task).ifPresent(BukkitTask::cancel));
         spawnTasks.clear();
 
+        long currentTime = System.currentTimeMillis() / 1000;
+
         for (EventLocation ev : eventLocations) {
-            long ticks = (long) ev.spawnIntervalMinutes() * 60L * 20L;
+            long intervalSeconds = (long) ev.spawnIntervalMinutes() * 60;
+            long cycle = currentTime % intervalSeconds;
+            long remainingSeconds = intervalSeconds - cycle;
+            long initialTicks = remainingSeconds * 20;
+            if (remainingSeconds == 0) {
+                initialTicks = intervalSeconds * 20;
+            }
+            long periodTicks = intervalSeconds * 20;
+
             BukkitTask task = new BukkitRunnable() {
                 @Override
                 public void run() {
                     spawnBlockAt(ev);
                 }
-            }.runTaskTimer(this, ticks, ticks);
+            }.runTaskTimer(this, initialTicks, periodTicks);
             spawnTasks.put(ev.location(), task);
+
+            if (remainingSeconds == 0 && !activeHologramNames.containsKey(ev.location())) {
+                new BukkitRunnable() {
+                    @Override
+                    public void run() {
+                        spawnBlockAt(ev);
+                    }
+                }.runTaskLater(this, 20L); // Spawn immediately next tick
+            }
         }
     }
 
@@ -284,7 +365,7 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         DHAPI.createHologram(holoName, holoLoc);
 
         remainingSeconds.put(loc, ev.breakableDelaySeconds());
-        updateHologramWithTimer(holoName, ev.breakableDelaySeconds());
+        updateHologramWithTimer(holoName, ev, ev.breakableDelaySeconds());
 
         activeHologramNames.put(loc, holoName);
         protectedBlocks.add(loc);
@@ -292,13 +373,33 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         spawnTimeMap.put(loc, System.currentTimeMillis());
 
         Map<String, String> ph = new HashMap<>();
-        ph.put("%world%", loc.getWorld().getName());
+        ph.put("%display_name%", ev.displayName());
+        ph.put("%world%", getColoredWorldName(loc.getWorld()));
         ph.put("%x%", String.valueOf(loc.getBlockX()));
         ph.put("%y%", String.valueOf(loc.getBlockY()));
         ph.put("%z%", String.valueOf(loc.getBlockZ()));
         broadcastList(msgEventStartBroadcast, ph);
 
         loc.getWorld().playSound(loc, soundSpawn, soundVolume, soundPitch);
+
+        if (bossbarEnabled) {
+            BarColor color;
+            try {
+                color = BarColor.valueOf(bossbarColorStr);
+            } catch (IllegalArgumentException e) {
+                color = BarColor.PURPLE;
+            }
+            BarStyle style;
+            try {
+                style = BarStyle.valueOf(bossbarStyleStr);
+            } catch (IllegalArgumentException e) {
+                style = BarStyle.SEGMENTED_10;
+            }
+            BossBar bar = Bukkit.createBossBar("", color, style);
+            bossBars.put(loc, bar);
+            Bukkit.getOnlinePlayers().forEach(bar::addPlayer);
+            updateBossBar(loc, ev);
+        }
 
         BukkitTask countdown = new BukkitRunnable() {
             @Override
@@ -311,16 +412,19 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
                 remainingSeconds.put(loc, left);
 
                 if (left <= 0) {
-                    Hologram holo = DHAPI.getHologram(holoName);
-                    if (holo != null) {
-                        DHAPI.setHologramLines(holo, coloredList(getConfig().getStringList("hologram-after")));
-                    }
+                    updateHologramAfter(holoName, ev);
                     protectedBlocks.remove(loc);
                     loc.getWorld().playSound(loc, soundBreakable, soundVolume, soundPitch);
+                    if (bossbarEnabled) {
+                        startBreakableUpdateTask(loc, ev);
+                    }
                     cancel();
                     return;
                 }
-                updateHologramWithTimer(holoName, left);
+                updateHologramWithTimer(holoName, ev, left);
+                if (bossbarEnabled) {
+                    updateBossBar(loc, ev);
+                }
             }
         }.runTaskTimer(this, 20L, 20L);
         countdownTasks.put(loc, countdown);
@@ -329,48 +433,112 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             @Override
             public void run() {
                 if (!activeHologramNames.containsKey(loc)) return;
-                endEventNaturally(loc, holoName);
+                endEventNaturally(loc, holoName, ev);
             }
-        }.runTaskLater(this, ev.disappearSeconds() * 20L);
+        }.runTaskLater(this, (long) ev.disappearSeconds() * 20L);
         disappearTasks.put(loc, disappear);
     }
 
-    private void updateHologramWithTimer(String holoName, int secondsLeft) {
-        String timer = formatTimeRussian(secondsLeft);
+    private void updateHologramWithTimer(String holoName, EventLocation ev, int secondsLeft) {
+        String timer = formatTime(secondsLeft);
         List<String> lines = new ArrayList<>();
         for (String raw : getConfig().getStringList("hologram-before")) {
-            lines.add(ChatColor.translateAlternateColorCodes('&', raw.replace("%timer_delay%", timer)));
+            String replaced = raw.replace("%display_name%", ev.displayName()).replace("%timer_delay%", timer);
+            lines.add(ChatColor.translateAlternateColorCodes('&', replaced));
         }
         Hologram holo = DHAPI.getHologram(holoName);
         if (holo != null) DHAPI.setHologramLines(holo, lines);
     }
 
-    private String formatTimeRussian(int totalSeconds) {
-        if (totalSeconds <= 0) return "0 " + onlySecondsFormat;
+    private void updateHologramAfter(String holoName, EventLocation ev) {
+        List<String> lines = new ArrayList<>();
+        for (String raw : getConfig().getStringList("hologram-after")) {
+            String replaced = raw.replace("%display_name%", ev.displayName());
+            lines.add(ChatColor.translateAlternateColorCodes('&', replaced));
+        }
+        Hologram holo = DHAPI.getHologram(holoName);
+        if (holo != null) DHAPI.setHologramLines(holo, lines);
+    }
+
+    private String formatTime(int totalSeconds) {
+        if (totalSeconds <= 0) return "0 " + secondsAbbr;
         int min = totalSeconds / 60;
         int sec = totalSeconds % 60;
-        if (min == 0) return sec + " " + declineSeconds(sec);
-        String m = min + " " + declineMinutes(min);
-        return sec > 0 ? m + separator + sec + " " + declineSeconds(sec) : m;
+        String m = min > 0 ? min + " " + minutesAbbr : "";
+        String s = sec > 0 ? sec + " " + secondsAbbr : "";
+        return timerFormat.replace("%m", m).replace("%s", s).trim();
     }
 
-    private String declineMinutes(int n) {
-        if (n % 10 == 1 && n % 100 != 11) return minSingular;
-        if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return minPlural;
-        return minMany;
+    private void updateBossBar(Location loc, EventLocation ev) {
+        BossBar bar = bossBars.get(loc);
+        if (bar == null) return;
+
+        String worldName = getColoredWorldName(loc.getWorld());
+        String displayName = ev.displayName();
+
+        int remainingBreakable = remainingSeconds.getOrDefault(loc, 0);
+        String text;
+        double progress;
+        if (remainingBreakable > 0) {
+            // Protected phase
+            String timer = formatTime(remainingBreakable);
+            text = bossbarProtectedText.replace("%display_name%", displayName)
+                    .replace("%world%", worldName)
+                    .replace("%timer_delay%", timer);
+            if (bossbarProtectedProgress) {
+                progress = (double) remainingBreakable / ev.breakableDelaySeconds();
+            } else {
+                progress = 1.0;
+            }
+        } else {
+            // Breakable phase
+            int remainingToDisappear = calculateRemainingToDisappear(loc, ev);
+            String timer = formatTime(remainingToDisappear);
+            text = bossbarBreakableText.replace("%display_name%", displayName)
+                    .replace("%world%", worldName)
+                    .replace("%timer_delay%", timer);
+            if (bossbarBreakableProgress) {
+                int breakableDuration = ev.disappearSeconds() - ev.breakableDelaySeconds();
+                progress = (double) remainingToDisappear / breakableDuration;
+            } else {
+                progress = 1.0;
+            }
+        }
+        bar.setTitle(ChatColor.translateAlternateColorCodes('&', text));
+        bar.setProgress(progress);
     }
 
-    private String declineSeconds(int n) {
-        if (n % 10 == 1 && n % 100 != 11) return secSingular;
-        if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return secPlural;
-        return secMany;
+    private int calculateRemainingToDisappear(Location loc, EventLocation ev) {
+        Long spawnTime = spawnTimeMap.get(loc);
+        if (spawnTime == null) return 0;
+        long elapsedMillis = System.currentTimeMillis() - spawnTime;
+        int elapsedSec = (int) (elapsedMillis / 1000);
+        return Math.max(0, ev.disappearSeconds() - elapsedSec);
     }
 
-    private void endEventNaturally(Location loc, String holoName) {
+    private void startBreakableUpdateTask(Location loc, EventLocation ev) {
+        BukkitTask task = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!activeHologramNames.containsKey(loc)) {
+                    cancel();
+                    return;
+                }
+                updateBossBar(loc, ev);
+            }
+        }.runTaskTimer(this, 20L, 20L);
+        breakableUpdateTasks.put(loc, task);
+    }
+
+    private void endEventNaturally(Location loc, String holoName, EventLocation ev) {
         Optional.ofNullable(DHAPI.getHologram(holoName)).ifPresent(Hologram::delete);
         loc.getBlock().setType(Material.AIR);
         loc.getWorld().playSound(loc, soundDisappear, soundVolume, soundPitch);
-        msgEventEndBroadcast.forEach(Bukkit.getServer()::broadcastMessage);
+
+        Map<String, String> ph = new HashMap<>();
+        ph.put("%display_name%", ev.displayName());
+        broadcastList(msgEventEndBroadcast, ph);
+
         cleanup(loc);
     }
 
@@ -379,9 +547,19 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         Location loc = e.getBlock().getLocation();
         if (!activeHologramNames.containsKey(loc)) return;
 
+        EventLocation ev = eventLocations.stream()
+                .filter(eventLoc -> eventLoc.location().equals(loc))
+                .findFirst()
+                .orElse(null);
+        if (ev == null) return;
+
         if (protectedBlocks.contains(loc)) {
             e.setCancelled(true);
-            msgProtectedBreak.forEach(e.getPlayer()::sendMessage);
+            String timer = formatTime(remainingSeconds.get(loc));
+            Map<String, String> ph = new HashMap<>();
+            ph.put("%timer_delay%", timer);
+            sendList(e.getPlayer(), msgProtectedBreak, ph);
+            loc.getWorld().playSound(loc, soundUnbreakable, soundVolume, soundPitch);
             return;
         }
 
@@ -395,9 +573,10 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
 
         loc.getWorld().playSound(loc, soundDisappear, soundVolume, soundPitch);
 
-        List<String> success = new ArrayList<>(msgBreakSuccessBroadcast);
-        success.replaceAll(line -> line.replace("%player%", e.getPlayer().getName()));
-        success.forEach(Bukkit.getServer()::broadcastMessage);
+        Map<String, String> ph = new HashMap<>();
+        ph.put("%display_name%", ev.displayName());
+        ph.put("%player%", e.getPlayer().getName());
+        broadcastList(msgBreakSuccessBroadcast, ph);
 
         cleanup(loc);
     }
@@ -409,6 +588,13 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         if (block == null) return;
         if (activeHologramNames.containsKey(block.getLocation())) {
             e.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent e) {
+        for (BossBar bar : bossBars.values()) {
+            bar.addPlayer(e.getPlayer());
         }
     }
 
@@ -473,19 +659,41 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             Location holoLoc = loc.clone().add(holoX, holoHeight, holoZ);
             DHAPI.createHologram(holoName, holoLoc);
 
-            remainingSeconds.put(loc, remainingBreakable);
-            updateHologramWithTimer(holoName, remainingBreakable);
-
-            activeHologramNames.put(loc, holoName);
-            if (remainingBreakable > 0) protectedBlocks.add(loc);
-
             EventLocation ev = eventLocations.stream()
                     .filter(e -> e.location().equals(loc))
                     .findFirst()
                     .orElse(null);
-            if (ev != null) {
-                long elapsed = ev.disappearSeconds() - disappearRemainingSeconds;
-                spawnTimeMap.put(loc, current - elapsed * 1000);
+            if (ev == null) continue;
+
+            remainingSeconds.put(loc, remainingBreakable);
+            activeHologramNames.put(loc, holoName);
+            if (remainingBreakable > 0) {
+                protectedBlocks.add(loc);
+                updateHologramWithTimer(holoName, ev, remainingBreakable);
+            } else {
+                updateHologramAfter(holoName, ev);
+            }
+
+            long elapsed = ev.disappearSeconds() - disappearRemainingSeconds;
+            spawnTimeMap.put(loc, current - elapsed * 1000);
+
+            if (bossbarEnabled) {
+                BarColor color;
+                try {
+                    color = BarColor.valueOf(bossbarColorStr);
+                } catch (IllegalArgumentException e) {
+                    color = BarColor.PURPLE;
+                }
+                BarStyle style;
+                try {
+                    style = BarStyle.valueOf(bossbarStyleStr);
+                } catch (IllegalArgumentException e) {
+                    style = BarStyle.SEGMENTED_10;
+                }
+                BossBar bar = Bukkit.createBossBar("", color, style);
+                bossBars.put(loc, bar);
+                Bukkit.getOnlinePlayers().forEach(bar::addPlayer);
+                updateBossBar(loc, ev);
             }
 
             if (remainingBreakable > 0) {
@@ -495,20 +703,22 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
                         int left = remainingSeconds.getOrDefault(loc, 0) - 1;
                         remainingSeconds.put(loc, left);
                         if (left <= 0) {
-                            Hologram holo = DHAPI.getHologram(holoName);
-                            if (holo != null) DHAPI.setHologramLines(holo, coloredList(getConfig().getStringList("hologram-after")));
+                            updateHologramAfter(holoName, ev);
                             protectedBlocks.remove(loc);
                             loc.getWorld().playSound(loc, soundBreakable, soundVolume, soundPitch);
+                            if (bossbarEnabled) {
+                                startBreakableUpdateTask(loc, ev);
+                            }
                             cancel();
                             return;
                         }
-                        updateHologramWithTimer(holoName, left);
+                        updateHologramWithTimer(holoName, ev, left);
+                        if (bossbarEnabled) {
+                            updateBossBar(loc, ev);
+                        }
                     }
                 }.runTaskTimer(this, 20L, 20L);
                 countdownTasks.put(loc, countdown);
-            } else {
-                Hologram holo = DHAPI.getHologram(holoName);
-                if (holo != null) DHAPI.setHologramLines(holo, coloredList(getConfig().getStringList("hologram-after")));
             }
 
             if (disappearRemainingSeconds > 0) {
@@ -516,10 +726,14 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
                     @Override
                     public void run() {
                         if (!activeHologramNames.containsKey(loc)) return;
-                        endEventNaturally(loc, holoName);
+                        endEventNaturally(loc, holoName, ev);
                     }
                 }.runTaskLater(this, disappearRemainingSeconds * 20L);
                 disappearTasks.put(loc, disappear);
+            }
+
+            if (remainingBreakable <= 0 && bossbarEnabled) {
+                startBreakableUpdateTask(loc, ev);
             }
         }
     }
@@ -537,7 +751,7 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             int x = Integer.parseInt(parts[1]);
             int y = Integer.parseInt(parts[2]);
             int z = Integer.parseInt(parts[3]);
-            return new Location(world, x + 0.5, y, z + 0.5);
+            return new Location(world, x, y, z);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -545,6 +759,7 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
 
     private void cancelTasks(Location loc) {
         Optional.ofNullable(countdownTasks.remove(loc)).ifPresent(BukkitTask::cancel);
+        Optional.ofNullable(breakableUpdateTasks.remove(loc)).ifPresent(BukkitTask::cancel);
         Optional.ofNullable(disappearTasks.remove(loc)).ifPresent(BukkitTask::cancel);
     }
 
@@ -553,11 +768,13 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         protectedBlocks.remove(loc);
         remainingSeconds.remove(loc);
         spawnTimeMap.remove(loc);
+        Optional.ofNullable(bossBars.remove(loc)).ifPresent(BossBar::removeAll);
     }
 
     private void cancelAllTasks() {
         spawnTasks.values().forEach(task -> Optional.ofNullable(task).ifPresent(BukkitTask::cancel));
         countdownTasks.values().forEach(task -> Optional.ofNullable(task).ifPresent(BukkitTask::cancel));
+        breakableUpdateTasks.values().forEach(task -> Optional.ofNullable(task).ifPresent(BukkitTask::cancel));
         disappearTasks.values().forEach(task -> Optional.ofNullable(task).ifPresent(BukkitTask::cancel));
     }
 
@@ -565,14 +782,20 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
         activeHologramNames.values().forEach(name -> Optional.ofNullable(DHAPI.getHologram(name)).ifPresent(Hologram::delete));
     }
 
+    private void removeAllBossBars() {
+        bossBars.values().forEach(BossBar::removeAll);
+    }
+
     private void clearMaps() {
         activeHologramNames.clear();
         protectedBlocks.clear();
         countdownTasks.clear();
+        breakableUpdateTasks.clear();
         spawnTasks.clear();
         disappearTasks.clear();
         remainingSeconds.clear();
         spawnTimeMap.clear();
+        bossBars.clear();
         eventLocations.clear();
         eventById.clear();
     }
@@ -588,24 +811,24 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
 
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
-        if (!command.getName().equalsIgnoreCase("jbe")) return Collections.emptyList();
-
         List<String> completions = new ArrayList<>();
 
-        if (args.length == 1) {
-            if ("reload".startsWith(args[0].toLowerCase()) && sender.hasPermission("jblockevent.admin")) completions.add("reload");
-            if ("start".startsWith(args[0].toLowerCase()) && sender.hasPermission("jblockevent.admin")) completions.add("start");
-            if ("stop".startsWith(args[0].toLowerCase()) && sender.hasPermission("jblockevent.admin")) completions.add("stop");
-            if ("eventsdelay".startsWith(args[0].toLowerCase())) completions.add("eventsdelay");
-        } else if (args.length == 2) {
-            if (args[0].equalsIgnoreCase("start") && sender.hasPermission("jblockevent.admin")) {
-                eventById.keySet().stream().map(String::valueOf).forEach(completions::add);
-            }
-            if (args[0].equalsIgnoreCase("stop") && sender.hasPermission("jblockevent.admin")) {
-                eventLocations.stream()
-                        .filter(ev -> activeHologramNames.containsKey(ev.location()))
-                        .map(ev -> String.valueOf(ev.id()))
-                        .forEach(completions::add);
+        if (command.getName().equalsIgnoreCase("jbe")) {
+            if (args.length == 1) {
+                if ("reload".startsWith(args[0].toLowerCase()) && sender.hasPermission("jblockevent.admin")) completions.add("reload");
+                if ("start".startsWith(args[0].toLowerCase()) && sender.hasPermission("jblockevent.admin")) completions.add("start");
+                if ("stop".startsWith(args[0].toLowerCase()) && sender.hasPermission("jblockevent.admin")) completions.add("stop");
+                if ("eventsdelay".startsWith(args[0].toLowerCase())) completions.add("eventsdelay");
+            } else if (args.length == 2) {
+                if (args[0].equalsIgnoreCase("start") && sender.hasPermission("jblockevent.admin")) {
+                    eventById.keySet().stream().map(String::valueOf).forEach(completions::add);
+                }
+                if (args[0].equalsIgnoreCase("stop") && sender.hasPermission("jblockevent.admin")) {
+                    eventLocations.stream()
+                            .filter(ev -> activeHologramNames.containsKey(ev.location()))
+                            .map(ev -> String.valueOf(ev.id()))
+                            .forEach(completions::add);
+                }
             }
         }
 
@@ -619,35 +842,38 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
 
         if (isEd || (isJbe && args.length > 0 && (args[0].equalsIgnoreCase("eventsdelay") || args[0].equalsIgnoreCase("ed")))) {
             if (!sender.hasPermission("jblockevent.player")) {
-                msgEventsDelayNoPermission.forEach(sender::sendMessage);
+                sendList(sender, msgEventsDelayNoPermission, null);
                 return true;
             }
 
-            msgEventsDelayHeader.forEach(sender::sendMessage);
+            Map<String, String> headerPh = new HashMap<>();
+            String total = String.valueOf(eventLocations.size());
+            headerPh.put("%total%", total);
+            headerPh.put("%total&", total + "&");
+            sendList(sender, msgEventsDelayHeader, headerPh);
 
             long currentTime = System.currentTimeMillis() / 1000;
 
             for (EventLocation ev : eventLocations) {
                 Location loc = ev.location();
-                String materialName = ev.material().name().toLowerCase().replace("_", " ");
+                String idStr = String.valueOf(ev.id());
+                Map<String, String> ph = new HashMap<>();
+                ph.put("%id%", idStr);
+                ph.put("%id ", idStr + " ");
+                ph.put("%display_name%", ev.displayName());
+                ph.put("%x%", String.valueOf(loc.getBlockX()));
+                ph.put("%y%", String.valueOf(loc.getBlockY()));
+                ph.put("%z%", String.valueOf(loc.getBlockZ()));
+                ph.put("%world%", getColoredWorldName(loc.getWorld()));
 
                 if (activeHologramNames.containsKey(loc)) {
                     int remaining = remainingSeconds.getOrDefault(loc, 0);
+                    String time = formatRemainingTime(remaining);
+                    ph.put("%time%", time);
                     if (remaining > 0) {
-                        String time = formatRemainingTime(remaining);
-                        msgEventsDelayActiveProtected.forEach(line -> sender.sendMessage(
-                                line.replace("%id%", String.valueOf(ev.id()))
-                                        .replace("%material%", materialName)
-                                        .replace("%time%", time)
-                        ));
+                        sendList(sender, msgEventsDelayActiveProtected, ph);
                     } else {
-                        msgEventsDelayActiveBreakable.forEach(line -> sender.sendMessage(
-                                line.replace("%id%", String.valueOf(ev.id()))
-                                        .replace("%material%", materialName)
-                                        .replace("%x%", String.valueOf(loc.getBlockX()))
-                                        .replace("%y%", String.valueOf(loc.getBlockY()))
-                                        .replace("%z%", String.valueOf(loc.getBlockZ()))
-                        ));
+                        sendList(sender, msgEventsDelayActiveBreakable, ph);
                     }
                 } else {
                     long intervalSeconds = (long) ev.spawnIntervalMinutes() * 60;
@@ -655,38 +881,36 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
                     long remainingToSpawn = intervalSeconds - cycle;
 
                     String time = formatRemainingTime(remainingToSpawn);
-                    msgEventsDelayInactive.forEach(line -> sender.sendMessage(
-                            line.replace("%id%", String.valueOf(ev.id()))
-                                    .replace("%material%", materialName)
-                                    .replace("%time%", time)
-                    ));
+                    ph.put("%time%", time);
+                    sendList(sender, msgEventsDelayInactive, ph);
                 }
             }
 
-            msgEventsDelayFooter.forEach(line -> sender.sendMessage(
-                    line.replace("%total%", String.valueOf(eventLocations.size()))
-            ));
+            Map<String, String> footerPh = new HashMap<>();
+            footerPh.put("%total%", total);
+            footerPh.put("%total&", total + "&");
+            sendList(sender, msgEventsDelayFooter, footerPh);
             return true;
         }
 
         if (!isJbe) return false;
 
         if (!sender.hasPermission("jblockevent.admin")) {
-            msgNoPermission.forEach(sender::sendMessage);
+            sendList(sender, msgNoPermission, null);
             return true;
         }
 
         if (args.length == 0) {
-            msgReloadUsage.forEach(sender::sendMessage);
+            sendList(sender, msgReloadUsage, null);
             return true;
         }
 
         if (args[0].equalsIgnoreCase("reload")) {
             loadConfigValues();
 
-            List<String> success = new ArrayList<>(msgReloadSuccess);
-            success.replaceAll(s -> s.replace("%events%", String.valueOf(eventLocations.size())));
-            success.forEach(sender::sendMessage);
+            Map<String, String> ph = new HashMap<>();
+            ph.put("%events%", String.valueOf(eventLocations.size()));
+            sendList(sender, msgReloadSuccess, ph);
             return true;
         }
 
@@ -695,23 +919,31 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             try {
                 id = Integer.parseInt(args[1]);
             } catch (NumberFormatException e) {
-                msgInvalidEventNumber.forEach(m -> sender.sendMessage(m.replace("%number%", args[1])));
+                Map<String, String> ph = new HashMap<>();
+                ph.put("%number%", args[1]);
+                sendList(sender, msgInvalidEventNumber, ph);
                 return true;
             }
 
             EventLocation ev = eventById.get(id);
             if (ev == null) {
-                msgInvalidEventNumber.forEach(m -> sender.sendMessage(m.replace("%number%", String.valueOf(id))));
+                Map<String, String> ph = new HashMap<>();
+                ph.put("%number%", String.valueOf(id));
+                sendList(sender, msgInvalidEventNumber, ph);
                 return true;
             }
 
             if (activeHologramNames.containsKey(ev.location())) {
-                msgEventAlreadyActive.forEach(m -> sender.sendMessage(m.replace("%number%", String.valueOf(id))));
+                Map<String, String> ph = new HashMap<>();
+                ph.put("%number%", String.valueOf(id));
+                sendList(sender, msgEventAlreadyActive, ph);
                 return true;
             }
 
             spawnBlockAt(ev);
-            msgEventStartedManually.forEach(m -> sender.sendMessage(m.replace("%number%", String.valueOf(id))));
+            Map<String, String> ph = new HashMap<>();
+            ph.put("%number%", String.valueOf(id));
+            sendList(sender, msgEventStartedManually, ph);
             return true;
         }
 
@@ -720,18 +952,22 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
             try {
                 id = Integer.parseInt(args[1]);
             } catch (NumberFormatException e) {
-                msgInvalidEventNumber.forEach(m -> sender.sendMessage(m.replace("%number%", args[1])));
+                Map<String, String> ph = new HashMap<>();
+                ph.put("%number%", args[1]);
+                sendList(sender, msgInvalidEventNumber, ph);
                 return true;
             }
 
             EventLocation ev = eventById.get(id);
             if (ev == null) {
-                msgInvalidEventNumber.forEach(m -> sender.sendMessage(m.replace("%number%", String.valueOf(id))));
+                Map<String, String> ph = new HashMap<>();
+                ph.put("%number%", String.valueOf(id));
+                sendList(sender, msgInvalidEventNumber, ph);
                 return true;
             }
 
             if (!activeHologramNames.containsKey(ev.location())) {
-                sender.sendMessage("§cИвент №" + id + " не активен!");
+                sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "§cИвент №" + id + " не активен!"));
                 return true;
             }
 
@@ -746,13 +982,14 @@ public final class JBlockEvent extends JavaPlugin implements Listener, TabComple
 
             cleanup(loc);
 
-            List<String> stopped = new ArrayList<>(msgEventStopped);
-            stopped.replaceAll(line -> line.replace("%id%", String.valueOf(id)));
-            stopped.forEach(sender::sendMessage);
+            Map<String, String> ph = new HashMap<>();
+            ph.put("%id%", String.valueOf(id));
+            ph.put("%display_name%", ev.displayName());
+            sendList(sender, msgEventStopped, ph);
             return true;
         }
 
-        msgReloadUsage.forEach(sender::sendMessage);
+        sendList(sender, msgReloadUsage, null);
         return true;
     }
 }
